@@ -162,8 +162,11 @@ tr.sep td{background:var(--wash);cursor:default;font-size:10.5px;color:var(--mut
 
 .notes p{font-family:var(--f-prose);font-size:17px;line-height:1.6;margin:0 0 10px;max-width:62ch}
 .mapsvg{width:100%;max-width:600px;height:auto;display:block}
-.landcv{width:100%;height:420px;display:block;border:1px solid var(--hair);background:var(--paper)}
-@media (max-width:640px){.landcv{height:300px}}
+.landcv{width:100%;height:540px;display:block;border:1px solid var(--hair);background:var(--paper)}
+@media (max-width:640px){.landcv{height:400px}}
+.landread{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px;margin-top:12px;font-size:11.5px;line-height:1.7}.landread>div{min-width:0}.landread .cap{display:block;margin-bottom:2px}
+.fpbar{display:inline-block;width:64px;height:6px;border:1px solid var(--fig);margin-right:6px;vertical-align:middle;position:relative}.fpbar b{position:absolute;inset:0 auto 0 0;background:repeating-linear-gradient(90deg,var(--fig) 0 1px,transparent 1px 2px)}
+@media (max-width:640px){.landread{grid-template-columns:1fr}}
 .roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .rost-y{font-size:9.5px;color:var(--wine);border-bottom:1px dotted var(--hair);padding-bottom:3px;margin-bottom:6px}
 .mcard{border:1px solid var(--hair);padding:8px 10px 9px;display:grid;gap:2px;align-content:start;min-width:0}
@@ -1426,62 +1429,131 @@ const PLACE={"0.10":"NEW INSTITUTIONS","4.10":"ASTROBIOLOGY","5.60":"MARINE GEOS
 const RELIEF={"5.77":[-1,46],"7.20":[-1.1,52],"5.60":[-.9,44],"5.75":[-.8,40],"5.95":[-.5,38],"5.71":[1.1,40],"5.90":[.9,36],"5.80":[.55,44],
  "6.10":[1.2,38],"6.12":[1.35,44],"6.15":[1.0,34],"6.40":[.5,40],"6.45":[.45,36],"7.10":[.9,30],"8.00":[1.9,28],"8.10":[1.5,32],
  "9.00":[1.2,30],"9.10":[1.0,32],"9.20":[.8,30],"0.10":[.6,34],"4.10":[.7,32]};
-const TG={nx:150,ny:84,h:null,w:null};
+/* Plan-view survey sheet. Territory = nearest field centre (Voronoi), elevation = density of register entries,
+   each field gets its own stipple texture, seas are scan lines, borders are dotted county lines. */
+const TG={nx:285,ny:150,cell:2,h:null,r:null,b:null,cen:null};
+const FK=Object.keys(FIELD_POS),isSea=k=>(RELIEF[k]||[1])[0]<0;
 function terrain(){
  if(TG.h)return TG;
- const {nx,ny}=TG,h=new Float32Array(nx*ny),w=new Uint8Array(nx*ny);
- const C=Object.entries(FIELD_POS).map(([k,p])=>[k,p[0],p[1],...(RELIEF[k]||[.6,36])]);
- for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const X=i/(nx-1)*570,Y=j/(ny-1)*300;let v=0;
-  for(const[k,fx,fy,amp,sg]of C){const d2=(X-fx)**2+(Y-fy)**2;v+=amp*Math.exp(-d2/(2*sg*sg))}
-  v+=(noise2(Math.floor(i/3),Math.floor(j/3),5)-.5)*.12+(noise2(i,j,9)-.5)*.05;
-  if(v<-.05){w[j*nx+i]=1;v=0}h[j*nx+i]=v}
- TG.h=h;TG.w=w;return TG;
+ const {nx,ny,cell}=TG,h=new Float32Array(nx*ny),r=new Uint8Array(nx*ny),b=new Uint8Array(nx*ny);
+ const pts=E.map(o=>o.pos);let mx=0;
+ for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const X=i*cell+1,Y=j*cell+1;let v=0,bd=1e9,bk=0;
+  for(const p of pts){const d2=(X-p[0])**2+(Y-p[1])**2;if(d2<9000)v+=Math.exp(-d2/(2*24*24))}
+  v+=(noise2(Math.floor(i/4),Math.floor(j/4),5)-.5)*.18;
+  FK.forEach((k,n)=>{const q=FIELD_POS[k],d=(X-q[0])**2+(Y-q[1])**2;if(d<bd){bd=d;bk=n}});
+  h[j*nx+i]=Math.max(0,v);r[j*nx+i]=bk;if(v>mx)mx=v}
+ for(let k=0;k<h.length;k++)h[k]/=mx;
+ const cen=FK.map(()=>[0,0,0]);
+ for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const k=j*nx+i,g=r[k];cen[g][0]+=i;cen[g][1]+=j;cen[g][2]++;
+  if((i<nx-1&&r[k+1]!==g)||(j<ny-1&&r[k+nx]!==g))b[k]=1}
+ TG.h=h;TG.r=r;TG.b=b;TG.cen=cen.map(([x,y,n])=>[x/n*cell,y/n*cell,n]);return TG;
 }
-function heightAt(X,Y){const {nx,ny,h}=terrain();const i=Math.max(0,Math.min(nx-1,Math.round(X/570*(nx-1)))),j=Math.max(0,Math.min(ny-1,Math.round(Y/300*(ny-1))));return h[j*nx+i]}
+const cellAt=(X,Y)=>{const {nx,ny,cell}=terrain();return Math.max(0,Math.min(ny-1,Math.floor(Y/cell)))*nx+Math.max(0,Math.min(nx-1,Math.floor(X/cell)))};
+function heightAt(X,Y){return terrain().h[cellAt(X,Y)]}
+function fieldAt(X,Y){return FK[terrain().r[cellAt(X,Y)]]}
+/* inferred footprint: own field, the fields of threaded entries, and fields whose ground lies near */
+function footprint(e){
+ const w={};const add=(k,v)=>{if(k)w[k]=(w[k]||0)+v};
+ add(e.field||fieldAt(e.pos[0],e.pos[1]),3);
+ [...(e.threads||[]),...(e.rev||[])].forEach(([t])=>{const o=byId[t];if(o)add(o.field,1)});
+ const {nx,ny,cell,r}=terrain();const near={};
+ for(let a=0;a<24;a++)for(const rad of[14,28,42]){const X=e.pos[0]+Math.cos(a/24*6.283)*rad,Y=e.pos[1]+Math.sin(a/24*6.283)*rad;if(X<0||Y<0||X>570||Y>300)continue;const k=fieldAt(X,Y);near[k]=(near[k]||0)+(rad===14?3:rad===28?2:1)}
+ const tot=Object.values(near).reduce((a,b)=>a+b,0)||1;Object.entries(near).forEach(([k,v])=>add(k,2.5*v/tot));
+ let s=Object.values(w).reduce((a,b)=>a+b,0);let L=Object.entries(w).map(([k,v])=>[k,v/s]).filter(x=>x[1]>=.08).sort((a,b)=>b[1]-a[1]).slice(0,4);
+ s=L.reduce((a,x)=>a+x[1],0);L=L.map(([k,v])=>[k,v/s]);
+ let pct=L.map(x=>Math.round(x[1]*100));pct[0]+=100-pct.reduce((a,b)=>a+b,0);return L.map((x,n)=>[x[0],pct[n]]);
+}
+function landStats(e){
+ const {h,r,b,nx,ny,cell}=terrain();const k0=cellAt(e.pos[0],e.pos[1]),el=h[k0];
+ const land=[];for(let k=0;k<h.length;k++)if(!isSea(FK[r[k]]))land.push(h[k]);land.sort((a,b)=>a-b);
+ const pc=land.findIndex(v=>v>=el)/land.length;
+ let border=null;for(let rad=2;rad<=14&&!border;rad+=2)for(let a=0;a<16;a++){const k=fieldAt(e.pos[0]+Math.cos(a/16*6.283)*rad,e.pos[1]+Math.sin(a/16*6.283)*rad);if(k!==FK[r[k0]]){border=k;break}}
+ const nb=E.filter(o=>o.id!==e.id).map(o=>[o,Math.hypot(o.pos[0]-e.pos[0],o.pos[1]-e.pos[1])]).sort((a,b)=>a[1]-b[1]).slice(0,3);
+ return {field:FK[r[k0]],el,ground:isSea(FK[r[k0]])?"open water":pc>.8?"high ground":pc>.45?"slope":"lowland",border,nb,fp:footprint(e)};
+}
 function drawLand(c,e,t){
- const dpr=Math.min(2,window.devicePixelRatio||1),W=c.clientWidth||900,H=c.clientHeight||420;
+ const dpr=Math.min(2,window.devicePixelRatio||1),W=c.clientWidth||900,H=c.clientHeight||520;
  c.width=Math.round(W*dpr);c.height=Math.round(H*dpr);const ctx=c.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);
  const paper=css("--paper"),ink=css("--ink"),wine=css("--wine"),muted=css("--muted"),fig=css("--fig");
  ctx.fillStyle=paper;ctx.fillRect(0,0,W,H);
- const {nx,ny,h,w}=terrain(),yaw=.10*Math.sin((t||0)*.035),cy=Math.cos(yaw),sy=Math.sin(yaw);
- const f=W*.6,hor=H*.2,camH=.72;
- const proj=(X,Y,ht)=>{let wx=(X-285)/285*1.35,z=2.45-(Y/300)*1.55;const dz=z-1.7;const rx=wx*cy-dz*sy,rz=dz*cy+wx*sy+1.7;return[W/2+rx/rz*f,hor+(camH-ht*.42)/rz*f*.9,rz]};
- let lx=-.6,lyy=.5,lz=.62;
- const rnd=mulberry(77);
- for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const k=j*nx+i,X=i/(nx-1)*570,Y=j/(ny-1)*300;
-  if(w[k]){const ph=Math.sin(i*.35+(t||0)*.22+j*.9);for(let s=0;s<2;s++)if(rnd()<.42+.2*ph){const [sx,sy2]=proj(X+(rnd()-.5)*4,Y,0);ctx.fillStyle=fig;ctx.globalAlpha=.42;ctx.fillRect(sx,Math.round(sy2),2.6,.8)}continue}
-  const hx=(h[k+(i<nx-1?1:0)]-h[k-(i>0?1:0)])*8,hy=(h[k+(j<ny-1?nx:0)]-h[k-(j>0?nx:0)])*8;
-  const nl=Math.hypot(hx,hy,1),sh=Math.max(0,(-hx*lx-hy*lyy+lz)/nl);
-  const flat=h[k]<.12,p=flat?.05+.05*rnd():Math.min(.95,.12+Math.pow(sh,1.6)*.9+h[k]*.12);
-  for(let s=0;s<3;s++)if(rnd()<p){const [sx,sy2]=proj(X+(rnd()-.5)*3.8,Y+(rnd()-.5)*3.6,h[k]);ctx.fillStyle=fig;ctx.globalAlpha=flat?.4:.8;ctx.fillRect(sx,sy2,1.25,1.25)}}
+ const narrow=W<560,top=24,PH=narrow?62:84,MH=H-top-PH-30,ML=8,MW=W-16;
+ const P=(X,Y)=>[ML+X/570*MW,top+Y/300*MH],sx=MW/570,sy=MH/300;
+ const {nx,ny,cell,h,r,b,cen}=terrain(),rnd=mulberry(77),dw=cell*sx,dh=cell*sy;
+ /* textures */
+ for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const k=j*nx+i,g=r[k],key=FK[g],[x,y]=P(i*cell,j*cell),v=h[k];
+  if(b[k]){if((i+j)%2===0){ctx.fillStyle=ink;ctx.globalAlpha=.9;ctx.fillRect(x,y,1.5,1.5)}continue}
+  if(b[k-1]||b[k+1]||b[k-nx]||b[k+nx]||b[k-2]||b[k-2*nx])continue;
+  if(isSea(key)){if(j%3===0&&rnd()<.30+.5*v+.12*Math.sin(i*.3+(t||0)*.2)){ctx.fillStyle=fig;ctx.globalAlpha=.5;ctx.fillRect(x,y,dw*1.1,.8)}continue}
+  const pat=g%3,p=.07+.75*v*v+.2*v;let ok;
+  if(pat===0)ok=rnd()<p;else if(pat===1)ok=(i+j)%3===0&&rnd()<p*2.6;else ok=i%2===0&&j%2===0&&rnd()<p*3.2;
+  if(ok){ctx.fillStyle=fig;ctx.globalAlpha=.85;ctx.fillRect(x,y,1.2,1.2)}}
+ /* contours: elevation = register density, interval 0.15, every third line indexed */
+ for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){const k=j*nx+i,v=h[k];if(isSea(FK[r[k]]))continue;
+  for(let L=1;L<7;L++){const lv=L*.15;if((v-lv)*(h[k+1]-lv)<0||(v-lv)*(h[k+nx]-lv)<0){const [x,y]=P(i*cell,j*cell);ctx.fillStyle=ink;ctx.globalAlpha=L%3===0?.7:.32;ctx.fillRect(x,y,L%3===0?1.4:1,L%3===0?1.4:1);break}}}
  ctx.globalAlpha=1;
- const boxes=[],free=(x,y,ww,hh)=>!boxes.some(b=>x<b[0]+b[2]&&x+ww>b[0]&&y<b[1]+b[3]&&y+hh>b[1]);
- ctx.font='500 9.5px "IBM Plex Mono",ui-monospace,monospace';ctx.textBaseline="bottom";
- const [mx,my]=proj(e.pos[0],e.pos[1],heightAt(e.pos[0],e.pos[1]));
+ const boxes=[],free=(x,y,ww,hh)=>!boxes.some(q=>x<q[0]+q[2]&&x+ww>q[0]&&y<q[1]+q[3]&&y+hh>q[1]);
+ const [mx,my]=P(e.pos[0],e.pos[1]);
+ /* section line A–A′ through this entry */
+ ctx.strokeStyle=wine;ctx.globalAlpha=.55;ctx.lineWidth=.8;ctx.setLineDash([6,3,1,3]);ctx.beginPath();ctx.moveTo(ML,my);ctx.lineTo(ML+MW,my);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+ ctx.font='700 9.5px "IBM Plex Mono",ui-monospace,monospace';ctx.fillStyle=wine;ctx.textBaseline="middle";ctx.fillText("A",ML+2,my-7);ctx.textAlign="right";ctx.fillText("A′",ML+MW-2,my-7);ctx.textAlign="left";
+ /* inferred footprint: a dashed territory stretched toward each field it draws on */
+ const st=landStats(e),fp=st.fp;
+ const dirs=fp.map(([k,pc])=>{const q=FIELD_POS[k],[qx,qy]=P(q[0],q[1]);return[Math.atan2(qy-my,qx-mx),pc/100,Math.hypot(qx-mx,qy-my)]});
+ ctx.beginPath();for(let a=0;a<=96;a++){const th=a/96*6.283;let rr=18;dirs.forEach(([d,w,dist])=>{const c0=Math.max(0,Math.cos(th-d));rr+=w*Math.min(70,dist*.7+12)*c0**4});const x=mx+Math.cos(th)*rr,y=my+Math.sin(th)*rr*.85;a?ctx.lineTo(x,y):ctx.moveTo(x,y)}
+ ctx.closePath();ctx.fillStyle=wine;ctx.globalAlpha=.07;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=wine;ctx.lineWidth=1.1;ctx.setLineDash([3,2]);ctx.stroke();ctx.setLineDash([]);
  /* threads */
- ctx.strokeStyle=wine;ctx.lineWidth=1.1;ctx.setLineDash([2,3]);
- [...e.threads,...e.rev].forEach(([tid])=>{const o=byId[tid];if(!o)return;const [ox,oy]=proj(o.pos[0],o.pos[1],heightAt(o.pos[0],o.pos[1]));ctx.beginPath();ctx.moveTo(mx,my);ctx.quadraticCurveTo((mx+ox)/2,Math.min(my,oy)-40,ox,oy);ctx.stroke()});
- ctx.setLineDash([]);
+ ctx.strokeStyle=wine;ctx.lineWidth=1;ctx.setLineDash([1,3]);ctx.globalAlpha=.8;
+ [...(e.threads||[]),...(e.rev||[])].forEach(([tid])=>{const o=byId[tid];if(!o)return;const [ox,oy]=P(o.pos[0],o.pos[1]);ctx.beginPath();ctx.moveTo(mx,my);ctx.quadraticCurveTo((mx+ox)/2,Math.min(my,oy)-30,ox,oy);ctx.stroke()});
+ ctx.setLineDash([]);ctx.globalAlpha=1;
+ /* nearest-neighbour ring */
+ if(st.nb.length){const d=st.nb[st.nb.length-1][1];ctx.strokeStyle=wine;ctx.globalAlpha=.45;ctx.lineWidth=.7;ctx.beginPath();ctx.ellipse(mx,my,d*sx,d*sy,0,0,7);ctx.stroke();ctx.globalAlpha=1}
  /* other entries */
- E.forEach(o=>{if(o.id===e.id)return;const [x,y]=proj(o.pos[0],o.pos[1],heightAt(o.pos[0],o.pos[1]));ctx.fillStyle=paper;ctx.strokeStyle=ink;ctx.lineWidth=1;
-  ctx.beginPath();if(o.kind==="lab")ctx.arc(x,y,2.2,0,7);else if(o.kind==="inst")ctx.rect(x-2.2,y-2.2,4.4,4.4);else if(o.kind==="build"){ctx.moveTo(x,y-3);ctx.lineTo(x+3,y+2);ctx.lineTo(x-3,y+2);ctx.closePath()}else{ctx.moveTo(x-3,y);ctx.lineTo(x,y-3);ctx.lineTo(x+3,y);ctx.lineTo(x,y+3);ctx.closePath()}ctx.fill();ctx.stroke()});
- /* field labels */
- Object.entries(FIELD_POS).forEach(([k,p])=>{const ht=heightAt(p[0],p[1]);const [x,y]=proj(p[0],p[1],Math.max(ht,0)+.35);const s=k+" "+(PLACE[k]||"");const tw=ctx.measureText(s).width;const bx=Math.max(4,Math.min(W-tw-4,x-tw/2)),by=y-12;
-  if(by<4||!free(bx-3,by-2,tw+6,14))return;boxes.push([bx-3,by-2,tw+6,14]);ctx.strokeStyle=muted;ctx.lineWidth=.8;ctx.beginPath();ctx.moveTo(x,by+12);ctx.lineTo(x,y+6);ctx.stroke();ctx.fillStyle=paper;ctx.globalAlpha=.85;ctx.fillRect(bx-3,by-1,tw+6,12);ctx.globalAlpha=1;ctx.fillStyle=ink;ctx.fillText(s,bx,by+11)});
- /* terra incognita: the flat ground farthest from every field */
- let best=null,bd=-1;for(let Y=40;Y<280;Y+=10)for(let X=40;X<540;X+=10){let d=1e9;for(const p of Object.values(FIELD_POS))d=Math.min(d,Math.hypot(X-p[0],Y-p[1]));if(d>bd){bd=d;best=[X,Y]}}
- if(best){const [x,y]=proj(best[0],best[1],0);boxes.push([x-50,y-12,100,26]);ctx.font='italic 10px Newsreader,Georgia,serif';ctx.fillStyle=muted;ctx.textAlign="center";ctx.fillText("terra incognita",x,y);ctx.fillText("hic sunt dracones",x,y+12);ctx.textAlign="left"}
+ E.forEach(o=>{if(o.id===e.id)return;const [x,y]=P(o.pos[0],o.pos[1]);ctx.fillStyle=paper;ctx.strokeStyle=ink;ctx.lineWidth=1;
+  ctx.beginPath();if(o.kind==="lab")ctx.arc(x,y,2.3,0,7);else if(o.kind==="inst")ctx.rect(x-2.3,y-2.3,4.6,4.6);else if(o.kind==="build"){ctx.moveTo(x,y-3);ctx.lineTo(x+3,y+2);ctx.lineTo(x-3,y+2);ctx.closePath()}else{ctx.moveTo(x-3,y);ctx.lineTo(x,y-3);ctx.lineTo(x+3,y);ctx.lineTo(x,y+3);ctx.closePath()}ctx.fill();ctx.stroke()});
  /* this entry */
- ctx.strokeStyle=wine;ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx,my-30);ctx.stroke();
- ctx.fillStyle=wine;ctx.beginPath();ctx.arc(mx,my-30,4.2,0,7);ctx.fill();ctx.beginPath();ctx.arc(mx,my,2.2,0,7);ctx.fill();
- ctx.font='700 11px "IBM Plex Mono",ui-monospace,monospace';const lab=short(e).toUpperCase();const tw=ctx.measureText(lab).width;const lxp=mx+8+tw<W-4?mx+8:mx-8-tw;const ly0=free(lxp-3,my-40,tw+6,15)?my-40:my+6;
- ctx.fillStyle=paper;ctx.globalAlpha=.9;ctx.fillRect(lxp-3,ly0,tw+6,15);ctx.globalAlpha=1;ctx.fillStyle=wine;ctx.fillText(lab,lxp,ly0+14);
- /* compass and sheet mark */
- ctx.font='9.5px "IBM Plex Mono",ui-monospace,monospace';ctx.fillStyle=muted;ctx.fillText("SHEET 1 · SURVEYED "+CHECKED,8,H-6);ctx.fillStyle=wine;ctx.fillText("SKETCH MAP · POSITIONS PLACED BY HAND, NOT YET COMPUTED",8,14);ctx.fillStyle=muted;ctx.textAlign="right";ctx.fillText("N ↑",W-8,16);ctx.textAlign="left";
+ ctx.fillStyle=wine;ctx.beginPath();ctx.arc(mx,my,4,0,7);ctx.fill();ctx.strokeStyle=paper;ctx.lineWidth=1.2;ctx.stroke();
+ ctx.font='700 11px "IBM Plex Mono",ui-monospace,monospace';ctx.textBaseline="alphabetic";const lab=short(e).toUpperCase(),tw=ctx.measureText(lab).width;
+ const lxp=mx+9+tw<W-6?mx+9:mx-9-tw,lyp=my-8;ctx.fillStyle=paper;ctx.globalAlpha=.9;ctx.fillRect(lxp-3,lyp-11,tw+6,15);ctx.globalAlpha=1;ctx.fillStyle=wine;ctx.fillText(lab,lxp,lyp);boxes.push([lxp-3,lyp-11,tw+6,15]);
+ /* territory names, letter-spaced, set inside each field */
+ const LS=narrow?.8:1.8;
+ FK.map((k,n)=>[k,cen[n]]).sort((a,b)=>b[1][2]-a[1][2]).forEach(([k,[cx,cy]])=>{const [x,y]=P(cx,cy);const name=PLACE[k]||k;
+  ctx.font=`500 ${narrow?7.5:9}px "IBM Plex Mono",ui-monospace,monospace`;const tw=ctx.measureText(name).width+name.length*LS;
+  ctx.font=`${narrow?7:8}px "IBM Plex Mono",ui-monospace,monospace`;const cw=ctx.measureText(k).width;const bw=Math.max(tw,cw)+6;let bx,by,okp=false;
+  for(const[dx,dy]of[[0,0],[0,16],[0,-16],[-40,0],[40,0],[0,30],[0,-30]]){bx=Math.max(ML+2,Math.min(ML+MW-bw-2,x-bw/2+dx));by=Math.max(top,Math.min(top+MH-24,y-12+dy));if(free(bx,by,bw,24)){okp=true;break}}
+  if(!okp)return;boxes.push([bx,by,bw,24]);
+  ctx.fillStyle=paper;ctx.globalAlpha=.82;ctx.fillRect(bx,by,bw,24);ctx.globalAlpha=1;ctx.textAlign="center";
+  ctx.fillStyle=muted;ctx.fillText(k,bx+bw/2,by+9);ctx.font=`500 ${narrow?7.5:9}px "IBM Plex Mono",ui-monospace,monospace`;ctx.fillStyle=isSea(k)?fig:ink;
+  let xx=bx+bw/2-tw/2;ctx.textAlign="left";for(const ch of name){ctx.fillText(ch,xx,by+20);xx+=ctx.measureText(ch).width+LS}});
+ /* terra incognita: the emptiest land */
+ let best=null,bv=9;for(let Y=40;Y<270;Y+=8)for(let X=40;X<530;X+=8){if(isSea(fieldAt(X,Y)))continue;const v=heightAt(X,Y);const [x,y]=P(X,Y);if(v<bv&&free(x-48,y-11,96,25)){bv=v;best=[x,y]}}
+ if(best&&bv<.12){ctx.font='italic 10px Newsreader,Georgia,serif';ctx.fillStyle=muted;ctx.textAlign="center";ctx.fillText("terra incognita",best[0],best[1]);ctx.fillText("hic sunt dracones",best[0],best[1]+11);ctx.textAlign="left"}
+ /* header and sheet marks */
+ ctx.font='9.5px "IBM Plex Mono",ui-monospace,monospace';ctx.fillStyle=wine;ctx.fillText(narrow?"SKETCH MAP · HAND-PLACED":"SKETCH MAP · POSITIONS PLACED BY HAND, NOT YET COMPUTED",8,14);
+ ctx.fillStyle=muted;ctx.textAlign="right";ctx.fillText(narrow?"N ↑":"PLAN VIEW · CONTOURS = REGISTER DENSITY · N ↑",W-8,14);ctx.textAlign="left";
+ /* cross-section A–A′ */
+ const py0=top+MH+22,pyb=py0+PH-18,X0=ML,PW=MW,j0=Math.max(0,Math.min(ny-1,Math.floor(e.pos[1]/cell)));
+ ctx.strokeStyle=muted;ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(X0,pyb);ctx.lineTo(X0+PW,pyb);ctx.stroke();
+ let prev=null,segStart=0;const prof=[];
+ for(let i=0;i<nx;i++){const k=j0*nx+i,key=FK[r[k]],x=X0+i/(nx-1)*PW,v=isSea(key)?0:h[k],y=pyb-v*(PH-26);prof.push([x,y,key]);
+  if(isSea(key)){if(i%2===0){ctx.fillStyle=fig;ctx.globalAlpha=.55;ctx.fillRect(x,pyb-3+Math.sin(i*.6)*1.2,dw,.8)}}
+  else for(let yy=y+2;yy<pyb;yy+=2.2)if(rnd()<.35){ctx.fillStyle=fig;ctx.globalAlpha=.6;ctx.fillRect(x,yy,1,1)}
+  if(prev!==null&&key!==prev){ctx.globalAlpha=1;ctx.strokeStyle=ink;ctx.lineWidth=.6;ctx.setLineDash([1,2]);ctx.beginPath();ctx.moveTo(x,pyb+4);ctx.lineTo(x,py0+4);ctx.stroke();ctx.setLineDash([]);segLabel(prev,segStart,x);segStart=x}
+  if(prev===null)segStart=x;prev=key}
+ segLabel(prev,segStart,X0+PW);
+ function segLabel(k,a,z){if(z-a<28)return;ctx.globalAlpha=1;ctx.font='8px "IBM Plex Mono",ui-monospace,monospace';ctx.fillStyle=muted;ctx.textAlign="center";ctx.fillText(k,(a+z)/2,pyb+11);ctx.textAlign="left"}
+ ctx.globalAlpha=1;ctx.strokeStyle=ink;ctx.lineWidth=1;ctx.beginPath();prof.forEach(([x,y],n)=>n?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.stroke();
+ const qx=X0+e.pos[0]/570*PW,qv=isSea(st.field)?0:st.el,qy=pyb-qv*(PH-26);ctx.strokeStyle=wine;ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(qx,qy);ctx.lineTo(qx,qy-12);ctx.stroke();ctx.fillStyle=wine;ctx.beginPath();ctx.arc(qx,qy-12,3,0,7);ctx.fill();
+ ctx.font='700 9px "IBM Plex Mono",ui-monospace,monospace';ctx.fillText("A",X0,py0-4);ctx.textAlign="right";ctx.fillText("A′",X0+PW,py0-4);ctx.font='9px "IBM Plex Mono",ui-monospace,monospace';ctx.fillStyle=muted;ctx.fillText("SECTION A–A′ · WEST–EAST THROUGH THIS ENTRY",X0+PW-18,py0-4);ctx.textAlign="left";
 }
 function landscapeSection(e){
- return `<canvas class="landcv" id="landcv" role="img" aria-label="${esc(e.name)} marked on a point-cloud terrain of research fields"></canvas>
- <p class="muted" style="font-size:10.5px;margin:8px 0 0">Survey sheet 1 · positions placed by hand · <a href="#key-landscape">how to read ↗</a></p>`;
+ const s=landStats(e),fn_=k=>`${k} ${esc(FIELDS[k]||PLACE[k]||k)}`;
+ const where=s.border?`On the border of ${fn_(s.field)} and ${fn_(s.border)}`:`Inside ${fn_(s.field)}`;
+ return `<canvas class="landcv" id="landcv" role="img" aria-label="${esc(e.name)} on a plan-view map of research fields, with a cross-section"></canvas>
+ <div class="landread">
+  <div><span class="cap">Footprint · inferred</span>${s.fp.map(([k,p])=>`<span class="fpbar"><b style="width:${p}%"></b></span><span class="num">${p}%</span> ${fn_(k)}`).join("<br>")}</div>
+  <div><span class="cap">Ground</span>${where} · ${s.ground}<br><span class="cap" style="margin-top:8px">Nearest entries</span>${s.nb.map(([o])=>`<a href="#${o.id}">${esc(short(o))}</a>`).join(" · ")}</div>
+ </div>
+ <p class="muted" style="font-size:10.5px;margin:8px 0 0">Survey sheet 1 · positions placed by hand · footprint inferred from this entry's field, its threads and the ground around it · <a href="#key-landscape">how to read ↗</a></p>`;
 }
 
 function mapSVG(e){
@@ -1607,14 +1679,17 @@ function renderKey(){
     ${keyRow("≡","Cells from one lab share its strain: the same symmetry and shell type.")}
     ${keyRow("↗","Click a cell to open the person's public page. Hover to watch it move.")}
    </div><p class="muted kn">Members are listed newest first. Where a lab does not publish join years, they follow in role order. Undergraduates are counted, not named.</p>`)}
-  ${sec(5,"Landscape",`<canvas class="landcv" id="landcv" style="height:340px" role="img" aria-label="Example landscape"></canvas>
+  ${sec(5,"Landscape",`<canvas class="landcv" id="landcv" style="height:460px" role="img" aria-label="Example landscape"></canvas>
    <div class="kgrid" style="margin-top:12px">
-    ${keyRow("▲","Each field rises as relief, stippled in indigo. The more established the field, the higher it stands.")}
+    ${keyRow("▦","Each field holds a territory, the ground closer to it than to any other field. Each has its own stipple: scattered, diagonal or gridded dots.")}
+    ${keyRow("┄","Dotted county lines mark the borders between fields.")}
+    ${keyRow("≋","Contours show elevation, which is the density of entries in this register. Peaks are crowded ground; every third contour is darker.")}
     ${keyRow("═","Ocean fields lie as horizontal scan lines of sea, which move slowly.")}
-    ${keyRow('<span class="thread">●|</span>',"The wine pin marks the entry whose dossier you are reading.")}
-    ${keyRow('<span class="thread">⌒</span>',"Dashed arcs are that entry's threads.")}
+    ${keyRow('<span class="thread">●</span>',"The wine dot marks the entry whose dossier you are reading. Its dashed outline is its inferred footprint, stretched toward each field it draws on; the thin ring reaches its third-nearest neighbour.")}
+    ${keyRow('<span class="thread">A–A′</span>',"A west–east section through the entry, drawn below the map, shows whether it sits on a peak, a slope or in a valley, and which fields it crosses.")}
+    ${keyRow('<span class="thread">⌒</span>',"Dotted arcs are that entry's threads.")}
     ${keyRow("○ □ △ ◇","Other labs, institutes, builders and fleets.")}
-    ${keyRow("<i>t.i.</i>","Terra incognita: the flat ground farthest from any field.")}
+    ${keyRow("<i>t.i.</i>","Terra incognita: the emptiest land on the sheet.")}
    </div><p class="muted kn">Positions are placed by hand for now. They will be recomputed from publication embeddings, so that distance on the map reflects distance in the literature.</p>`)}
   ${sec(6,"Field codes",`<div class="listwrap"><table class="list"><thead><tr><th class="cap">Code</th><th class="cap">Field</th><th class="cap">On the landscape</th><th class="cap">Entries</th></tr></thead><tbody>
    ${Object.keys(FIELDS).sort().map(k=>`<tr><td class="num">${k}</td><td>${esc(FIELDS[k])}</td><td class="muted">${(RELIEF[k]||[0])[0]<0?"sea":"relief"} · ${esc(PLACE[k]||"")}</td><td class="num">${counts[k]||0}</td></tr>`).join("")}
